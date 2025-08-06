@@ -31,11 +31,17 @@ def remove_past(x, receptive_field):
     """ Removes past tensors. The past is indicated by the receptive field. Creates a copy."""
     if isinstance(x, torch.Tensor):
         return x[:, (receptive_field-1):].contiguous()
-
-    output = {}
-    for key, value in x.items():
-        output[key] = remove_past(value, receptive_field)
-    return output
+    elif isinstance(x, list):
+        # For lists (like text_instructions), return as-is since they don't have temporal dimension
+        return x
+    elif isinstance(x, dict):
+        output = {}
+        for key, value in x.items():
+            output[key] = remove_past(value, receptive_field)
+        return output
+    else:
+        # For other types, return as-is
+        return x
 
 
 def remove_last(x):

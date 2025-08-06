@@ -1,0 +1,216 @@
+Bootstrap: docker
+From: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
+
+##############################
+# 0. 便利変数
+##############################
+%environment
+    # CUDA
+    export CUDA_HOME="/usr/local/cuda"
+    export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu:/usr/local/lib:$LD_LIBRARY_PATH"
+    # System libraries for OpenCV
+    export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
+    # Python path
+    export PYTHONPATH="/workspace:$PYTHONPATH"
+    # Conda 初期化 (ランタイム)
+    source /opt/conda/etc/profile.d/conda.sh
+    conda activate base
+
+##############################
+# 1. ビルド時 (%post)
+##############################
+%post
+    #---------- 基本設定 ----------
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+    echo ">>> START %post"
+
+                 #---------- 1) OS パッケージ (OpenCV + GLib 完全対応) ----------
+        echo ">>> Installing system packages for OpenCV + GLib support"
+        apt-get update && apt-get install -y --no-install-recommends \
+            wget git ca-certificates \
+            libglib2.0-0 \
+            libglib2.0-dev \
+            libgthread-2.0-0 \
+            libgthread-2.0-dev \
+            pkg-config \
+            libsm6 \
+            libxext6 \
+            libxrender-dev \
+            libgomp1 \
+            libgstreamer1.0-0 \
+            libgstreamer-plugins-base1.0-0 \
+            libgtk-3-0 \
+            libgtk-3-dev \
+            libgdk-pixbuf2.0-0 \
+            libcairo2 \
+            libpango-1.0-0 \
+            libatk1.0-0 \
+            libfontconfig1 \
+            libfreetype6 \
+            && rm -rf /var/lib/apt/lists/*
+        
+        echo ">>> Setting up library paths"
+        echo "/usr/lib/x86_64-linux-gnu" >> /etc/ld.so.conf.d/opencv.conf
+        echo "/usr/local/lib" >> /etc/ld.so.conf.d/opencv.conf
+        ldconfig
+
+    #---------- 2) conda 更新 ----------
+    echo ">>> Updating conda"
+    conda update -y -n base -c defaults conda
+
+                 #---------- 3) FFmpeg + AV1 対応ライブラリ ----------
+        echo ">>> Installing ffmpeg (conda-forge, AV1 enabled)"
+        conda install -y -c conda-forge \
+            ffmpeg \
+            av \
+            gymnasium=0.28.1 \
+            jupyter=1.0.0
+        
+        echo ">>> Installing additional AV1 support via apt"
+        apt-get update && apt-get install -y --no-install-recommends \
+            libaom-dev \
+            libdav1d-dev \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            && rm -rf /var/lib/apt/lists/*
+     
+     #---------- 4) NumPy + OpenCV (バージョン整合性確保) ----------
+     echo ">>> Installing NumPy + OpenCV with version compatibility"
+     # NumPy を固定してから OpenCV をインストール
+     pip install --no-cache-dir --force-reinstall numpy==1.24.4
+     pip install --no-cache-dir opencv-python-headless==4.8.0.74
+
+         #---------- 5) pip パッケージ (NumPy互換バージョン) ----------
+     echo ">>> pip install (with NumPy 1.24.4 compatibility)"
+     pip install --no-cache-dir \
+         pytorch-lightning==2.4.0 \
+         torchmetrics==1.4.0 \
+         wandb==0.18.5 \
+         timm==1.0.11 \
+         hydra-core==1.3.2 \
+         "scipy>=1.10,<1.15" \
+         fvcore==0.1.5.post20221221 \
+         h5py==3.12.1 \
+         moviepy==1.0.3 \
+         stable-baselines3==2.3.2 \
+         importlib-resources==6.4.5 \
+         "imgaug>=0.4.0" \
+         scikit-video==1.1.11 \
+         transformers==4.46.3 \
+         yacs==0.1.8 \
+         "Pillow>=10.0,<11.0" \
+         "matplotlib>=3.7,<3.10" \
+         pyyaml==6.0.2 \
+         tqdm==4.66.5 \
+         pytest==8.3.3 \
+         black==24.10.0 \
+         flake8==7.1.1 \
+         ipywidgets==8.1.5 \
+         accelerate==1.9.0 \
+         sentence_transformers==5.0.0
+
+
+                 #---------- 6) 動作確認 ----------
+        echo ">>> FFmpeg AV1 codec check"
+        echo "=== Available AV1 decoders ==="
+        ffmpeg -hide_banner -decoders | grep -i av1 || echo "No AV1 decoders found"
+        echo "=== Available AV1 encoders ==="
+        ffmpeg -hide_banner -encoders | grep -i av1 || echo "No AV1 encoders found"
+        echo "=== FFmpeg build configuration ==="
+        ffmpeg -hide_banner -buildconf | grep -E "(libaom|libdav1d)" || echo "AV1 libraries not detected in build"
+
+             echo ">>> Libraries compatibility check"
+        python3 -c "
+import subprocess, os, sys
+
+# NumPy バージョン確認
+try:
+    import numpy as np
+    print('NumPy:', np.__version__)
+    print('NumPy API compatibility:', hasattr(np, '_ARRAY_API') or 'OK (1.24.x)')
+except Exception as e:
+    print('NumPy error:', e)
+
+# PyAV + FFmpeg 確認
+try:
+    import av
+    print('PyAV:', av.__version__)
+    cmd = 'ffmpeg -hide_banner -codecs | grep -E \"av1.*Dec\" | head -n1'
+    os.system(cmd)
+except Exception as e:
+    print('PyAV error:', e)
+
+# OpenCV 確認
+try:
+    import cv2
+    print('OpenCV:', cv2.__version__)
+    print('OpenCV backends:', [cv2.videoio_registry.getBackendName(i) for i in cv2.videoio_registry.getBackends()])
+    print('OpenCV + NumPy compatibility: OK')
+    
+    # 簡単な動画ファイル作成とテスト
+    import numpy as np
+    test_video = '/tmp/test.mp4'
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(test_video, fourcc, 1.0, (64, 64))
+    for i in range(3):
+        frame = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
+        out.write(frame)
+    out.release()
+    
+    # 動画読み込みテスト
+    cap = cv2.VideoCapture(test_video)
+    if cap.isOpened():
+        ret, frame = cap.read()
+        cap.release()
+        print('OpenCV video I/O: WORKING')
+        os.remove(test_video)
+    else:
+        print('OpenCV video I/O: FAILED')
+except Exception as e:
+    print('OpenCV error:', e)
+    import traceback
+    traceback.print_exc()
+"
+
+         #---------- 7) スタートアップスクリプト ----------
+    cat <<'BASH' > /opt/startup.sh
+#!/bin/bash
+source /opt/conda/etc/profile.d/conda.sh
+conda activate base
+exec "$@"
+BASH
+    chmod +x /opt/startup.sh
+
+    echo ">>> END %post"
+
+##############################
+# 2. 実行 /run /start
+##############################
+%runscript
+    exec /opt/startup.sh "$@"
+
+%startscript
+    exec /opt/startup.sh "$@"
+
+##############################
+# 3. ラベル & ヘルプ
+##############################
+%labels
+    Author "Robot MILE Team"
+    Version "2.0"
+    Description "Robot‑MILE container with AV1‑enabled FFmpeg (conda‑forge build)"
+
+%help
+    Singularity image for Robot‑MILE with CUDA 12.4, PyTorch 2.6, AV1‑capable FFmpeg.
+
+    Build:
+        singularity build robot_mile.sif robot_mile.def
+
+    Run (GPU):
+        singularity shell --nv robot_mile.sif
+        singularity exec  --nv robot_mile.sif python train.py
+
+    Bind current dir:
+        singularity exec --nv -B $(pwd):/workspace robot_mile.sif python train.py

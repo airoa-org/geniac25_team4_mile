@@ -1,0 +1,36 @@
+# Core dependencies for Robot MILE
+torch>=1.9.0
+torchvision>=0.10.0
+timm>=0.6.0
+transformers>=4.21.0
+yacs>=0.1.8
+numpy>=1.21.0
+
+# Image processing
+opencv-python>=4.5.0
+Pillow>=8.3.0
+
+# Visualization (optional)
+matplotlib>=3.5.0
+
+# Configuration and utilities
+pyyaml>=6.0
+tqdm>=4.62.0
+
+# For robot simulation (optional)
+# pybullet>=3.2.0
+
+# For ROS integration (optional, install separately if needed)
+# rospy
+# sensor_msgs
+# std_msgs
+# geometry_msgs
+
+# Development and testing (optional)
+pytest>=6.2.0
+black>=21.9.0
+flake8>=3.9.0
+
+# Jupyter notebook support (optional)
+jupyter>=1.0.0
+ipywidgets>=7.6.0 
