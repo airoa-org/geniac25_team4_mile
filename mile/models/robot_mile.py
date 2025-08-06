@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import timm
 import torch.nn.functional as F
-from transformers import AutoTokenizer, AutoModel
+from sentence_transformers import SentenceTransformer
 
 from mile.utils.network_utils import pack_sequence_dim, unpack_sequence_dim, remove_past
 from mile.models.common import Decoder, Policy
@@ -11,52 +11,39 @@ from mile.models.transition import RSSM
 
 
 class LanguageEncoder(nn.Module):
-    """Encodes language instructions using a pretrained language model"""
-    def __init__(self, model_name='distilbert-base-uncased', hidden_dim=256):
+    """Encodes language instructions using a pretrained SentenceTransformer model."""
+    def __init__(self, model_name='all-mpnet-base-v2', hidden_dim=256):
         super().__init__()
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.language_model = AutoModel.from_pretrained(model_name)
+        self.language_model = SentenceTransformer(model_name)
+        embedding_dim = self.language_model.get_sentence_embedding_dimension()
+
         self.language_projection = nn.Sequential(
-            nn.Linear(self.language_model.config.hidden_size, hidden_dim),
-            nn.ReLU(True),
+            nn.Linear(embedding_dim, hidden_dim),
+            nn.ReLU(inplace=True),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(True),
+            nn.ReLU(inplace=True),
         )
         self.hidden_dim = hidden_dim
-        
+
     def forward(self, text_instructions):
         """
         Args:
-            text_instructions: List of strings or tokenized text
+            text_instructions: List of strings
+
         Returns:
-            language_features: (batch_size, hidden_dim)
+            language_features: Tensor (batch_size, hidden_dim)
         """
-        if isinstance(text_instructions[0], str):
-            # Tokenize text if not already tokenized
-            tokenized = self.tokenizer(
+        # Encode text using SentenceTransformer
+        with torch.no_grad():  # Typically embeddings are frozen unless fine-tuning
+            embeddings = self.language_model.encode(
                 text_instructions, 
-                return_tensors='pt', 
-                padding=True, 
-                truncation=True,
-                max_length=128
-            )
-            input_ids = tokenized['input_ids'].to(next(self.parameters()).device)
-            attention_mask = tokenized['attention_mask'].to(next(self.parameters()).device)
-        else:
-            input_ids, attention_mask = text_instructions
-            
-        # Get language model outputs
-        outputs = self.language_model(input_ids=input_ids, attention_mask=attention_mask)
-        
-        # Use [CLS] token representation or mean pooling
-        if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
-            language_features = outputs.pooler_output
-        else:
-            # Mean pooling over sequence length
-            language_features = outputs.last_hidden_state.mean(dim=1)
-            
+                convert_to_tensor=True,
+                normalize_embeddings=True
+            ).to(next(self.parameters()).device)
+        embeddings = embeddings.clone()
         # Project to desired dimension
-        language_features = self.language_projection(language_features)
+        language_features = self.language_projection(embeddings)
+
         return language_features
 
 
@@ -195,6 +182,14 @@ class RobotMile(nn.Module):
             action_range=cfg.MODEL.ACTION_RANGE
         )
 
+        # Image reconstruction head (always enabled for better representation learning)
+        from mile.models.common import RGBHead
+        self.rgb_decoder = RGBHead(
+            in_channels=state_dim,
+            n_classes=3,  # RGB channels
+            downsample_factor=1
+        )
+
         # Used during deployment to save last state
         self.last_h = None
         self.last_sample = None
@@ -240,9 +235,19 @@ class RobotMile(nn.Module):
             state = embedding
 
         # Generate joint actions
-        state = pack_sequence_dim(state)
-        joint_actions = self.policy(state)
+        state_packed = pack_sequence_dim(state)
+        joint_actions = self.policy(state_packed)
         output['joint_actions'] = unpack_sequence_dim(joint_actions, b, s)
+
+        # Always perform image reconstruction for better representation learning
+        # Convert state vector to spatial feature map for RGB decoder
+        spatial_size = 8  # Small spatial size for efficiency
+        state_spatial = state_packed.view(state_packed.shape[0], state_packed.shape[1], 1, 1)
+        state_spatial = state_spatial.expand(-1, -1, spatial_size, spatial_size)
+        
+        rgb_output = self.rgb_decoder(state_spatial)
+        rgb_output = unpack_sequence_dim(rgb_output, b, s)
+        output = {**output, **rgb_output}
 
         return output
 
