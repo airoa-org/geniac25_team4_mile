@@ -31,6 +31,16 @@ train_hsr.py                     # 旧実装用学習スクリプト
 ```
 
 ## 🚀 クイックスタート
+### 0. 環境構築
+```bash
+# singularityコンテナのbuild
+# スクリプトのTMP_DIRのpathを変更する
+bash sh/build.sh
+
+# singularityコンテナの起動
+# スクリプトのTMP_DIRのpathを変更する
+bash sh/run.sh
+```
 
 ### 1. データセットテスト
 ```bash
