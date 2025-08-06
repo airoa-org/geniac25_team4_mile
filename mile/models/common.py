@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from sentence_transformers import SentenceTransformer
 
 
 class RouteEncode(nn.Module):
@@ -238,3 +239,40 @@ class BevDecoder(nn.Module):
 
         output = {**output_4, **output_2, **output_1}
         return output
+
+
+class LanguageEncoder(nn.Module):
+    """Encodes language instructions using a pretrained SentenceTransformer model."""
+    def __init__(self, model_name='all-mpnet-base-v2', hidden_dim=256):
+        super().__init__()
+        self.language_model = SentenceTransformer(model_name)
+        embedding_dim = self.language_model.get_sentence_embedding_dimension()
+
+        self.language_projection = nn.Sequential(
+            nn.Linear(embedding_dim, hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(inplace=True),
+        )
+        self.hidden_dim = hidden_dim
+
+    def forward(self, text_instructions):
+        """
+        Args:
+            text_instructions: List of strings
+
+        Returns:
+            language_features: Tensor (batch_size, hidden_dim)
+        """
+        # Encode text using SentenceTransformer
+        with torch.no_grad():  # Typically embeddings are frozen unless fine-tuning
+            embeddings = self.language_model.encode(
+                text_instructions, 
+                convert_to_tensor=True,
+                normalize_embeddings=True
+            ).to(next(self.parameters()).device)
+        embeddings = embeddings.clone()
+        # Project to desired dimension
+        language_features = self.language_projection(embeddings)
+
+        return language_features
