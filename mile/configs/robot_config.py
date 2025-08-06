@@ -20,6 +20,8 @@ def get_robot_config():
     cfg.MODEL.NUM_JOINTS = 7  # Number of robot joints (e.g., 7-DOF arm)
     cfg.MODEL.ACTION_RANGE = (-1.0, 1.0)  # Action output range
     cfg.MODEL.EMBEDDING_DIM = 512
+    cfg.MODEL.SEQUENCE_LENGTH = 8  # Default sequence length for temporal modeling
+    cfg.MODEL.HIDDEN_STATE_DIM = 256  # Hidden state dimension for models
     
     # Image encoder settings
     cfg.MODEL.ENCODER = CN()
@@ -28,7 +30,7 @@ def get_robot_config():
     
     # Language model settings
     cfg.MODEL.LANGUAGE = CN()
-    cfg.MODEL.LANGUAGE.MODEL_NAME = 'distilbert-base-uncased'
+    cfg.MODEL.LANGUAGE.MODEL_NAME = 'all-mpnet-base-v2'
     cfg.MODEL.LANGUAGE.HIDDEN_DIM = 256
     
     # Joint state encoder settings
@@ -57,12 +59,13 @@ def get_robot_config():
     cfg.LOSS = CN()
     cfg.LOSS.ACTION_WEIGHT = 1.0
     cfg.LOSS.KL_WEIGHT = 1.0
-    cfg.LOSS.RECONSTRUCTION_WEIGHT = 1.0
+    cfg.LOSS.RECONSTRUCTION_WEIGHT = 1e-3
     
     # Evaluation settings
     cfg.EVAL = CN()
     cfg.EVAL.BATCH_SIZE = 1
     cfg.EVAL.SEQUENCE_LENGTH = 16
+    cfg.EVAL.RGB_SUPERVISION = True  # Enable image reconstruction by default
     
     return cfg
 
