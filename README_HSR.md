@@ -35,25 +35,22 @@ train_hsr.py                     # 旧実装用学習スクリプト
 ### 1. データセットテスト
 ```bash
 # 厳密モード（推奨）- ダミーデータなし
-python test_hsr_no_dummy.py --data_root /path/to/hsr_data
+python test_hsr_dataset.py --data_root /path/to/hsr_data
 
 # 動画込みテスト（H264フォールバック）
-python test_hsr_no_dummy.py \
+python test_hsr_dataset.py \
     --data_root /path/to/hsr_data \
     --test_video \
     --test_datamodule
-
-# 従来のテスト（参考用）
-python test_hsr_dataset_v2.py --data_root /path/to/hsr_data
 ```
 
 ### 2. 学習開始
 ```bash
 # 基本学習
-python train_hsr_v2.py --data_root /path/to/hsr_data
+python train_hsr.py --data_root /path/to/hsr_data
 
 # 高速学習（ビデオキャッシュ使用）
-python train_hsr_v2.py \
+python train_hsr.py \
     --data_root /path/to/hsr_data \
     --cache_videos \
     --img_resize 224 224 \
@@ -63,7 +60,7 @@ python train_hsr_v2.py \
 ### 3. 高度な設定
 ```bash
 # W&B + 大規模学習
-python train_hsr_v2.py \
+python train_hsr.py \
     --data_root /path/to/hsr_data \
     --experiment_name "hsr_large_scale" \
     --epochs 200 \
@@ -274,10 +271,7 @@ data_module = HSRDataModule(
 ### 学習スクリプト変更
 ```bash
 # 旧スクリプト
-python train_hsr.py --data_root /data
-
-# 新スクリプト
-python train_hsr_v2.py --data_root /data
+python train_hsr.py --data_root data/tmc_new
 ```
 
 ### バッチデータ形式
