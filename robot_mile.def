@@ -107,7 +107,10 @@ From: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
          pytest==8.3.3 \
          black==24.10.0 \
          flake8==7.1.1 \
-         ipywidgets==8.1.5
+         ipywidgets==8.1.5 \
+         accelerate==1.9.0 \
+         sentence_transformers==5.0.0
+
 
                  #---------- 6) 動作確認 ----------
         echo ">>> FFmpeg AV1 codec check"
