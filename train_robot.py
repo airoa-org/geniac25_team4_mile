@@ -41,9 +41,10 @@ class HSRTrainer:
         model: RobotMile,
         data_module: HSRDataModule,
         device: torch.device,
-        experiment_name: str = "hsr_robot_mile_v2",
+        experiment_name: str | None = None,
         use_wandb: bool = False,
         use_tensorboard: bool = True,
+        save_every_steps: int | None = None,
     ):
         self.config = config
         self.model = model.to(device)
@@ -67,11 +68,13 @@ class HSRTrainer:
         self.global_step = 0
         self.epoch = 0
         self.best_val_loss = float('inf')
+        self.save_every_steps = save_every_steps if (save_every_steps and save_every_steps > 0) else None
+
         
         if self.use_wandb:
             wandb.init(
                 project="hsr-robot-mile-v2",
-                name=experiment_name,
+                name=experiment_name or "robot_mile_v2",
                 config=self._config_to_dict(config)
             )
         
@@ -262,6 +265,7 @@ class HSRTrainer:
         
         return losses
 
+
     def train_epoch(self) -> Dict[str, float]:
         """Train for one epoch."""
         self.model.train()
@@ -305,6 +309,10 @@ class HSRTrainer:
                 num_batches += 1
                 self.global_step += 1
                 
+                # Step checkpointing
+                if getattr(self, 'save_every_steps', None) is not None and (self.global_step % self.save_every_steps == 0):
+                    self.save_checkpoint(is_best=False, step=self.global_step)
+
                 # Log to wandb/tensorboard every 10 steps
                 if self.global_step % 10 == 0:  # Log every 10 steps
                     print(f"📊 Logging step {self.global_step}...")  # Debug print
@@ -383,12 +391,18 @@ class HSRTrainer:
             if self.use_tensorboard:
                 self.tb_writer.add_scalar(f"{phase}/{key}", value, self.global_step)
 
-    def save_checkpoint(self, is_best: bool = False):
+    def _get_model_state_dict(self):
+        try:
+            return self.model.module.state_dict() if hasattr(self.model, 'module') else self.model.state_dict()
+        except Exception:
+            return self.model.state_dict()
+
+    def save_checkpoint(self, is_best: bool = False, step: int | None = None):
         """Save model checkpoint."""
         checkpoint = {
             'epoch': self.epoch,
             'global_step': self.global_step,
-            'model_state_dict': self.model.state_dict(),
+            'model_state_dict': self._get_model_state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'best_val_loss': self.best_val_loss,
             'config': self.config,
@@ -404,6 +418,12 @@ class HSRTrainer:
             torch.save(checkpoint, best_path)
             print(f"💾 Saved best checkpoint: {best_path}")
         
+        # Save step checkpoint if requested
+        if step is not None:
+            step_path = self.checkpoint_dir / f"step_{step:09d}.pt"
+            torch.save(checkpoint, step_path)
+            print(f"💾 Saved step checkpoint: {step_path}")
+
         # Save epoch checkpoint
         if self.epoch % 10 == 0:  # Save every 10 epochs
             epoch_path = self.checkpoint_dir / f"epoch_{self.epoch:04d}.pt"
@@ -414,7 +434,10 @@ class HSRTrainer:
         try:
             checkpoint = torch.load(checkpoint_path, map_location=self.device)
             
-            self.model.load_state_dict(checkpoint['model_state_dict'])
+            if hasattr(self.model, 'module'):
+                self.model.module.load_state_dict(checkpoint['model_state_dict'])
+            else:
+                self.model.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             self.epoch = checkpoint['epoch']
             self.global_step = checkpoint['global_step']
@@ -536,11 +559,11 @@ def adjust_config_to_data(config, data_module):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train HSR Robot MILE v2 with Reconstruction")
+    parser = argparse.ArgumentParser(description="Train Robot MILE v2 with Reconstruction")
     parser.add_argument("--data_root", type=str, required=True,
                        help="Path to HSR dataset root")
-    parser.add_argument("--experiment_name", type=str, default="hsr_robot_mile_v2_recon",
-                       help="Experiment name for logging")
+    parser.add_argument("--experiment_name", type=str, default=None,
+                       help="Experiment name for logging (default: auto-generated from robot_type)")
     parser.add_argument("--epochs", type=int, default=100,
                        help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=4,
@@ -549,12 +572,16 @@ def main():
                        help="Learning rate")
     parser.add_argument("--num_workers", type=int, default=4,
                        help="Number of data loading workers")
+    parser.add_argument("--gpus", type=int, default=1,
+                       help="Number of GPUs to use (DataParallel). Use >1 to enable multi-GPU")
     parser.add_argument("--cache_videos", action="store_true",
                        help="Cache videos in memory for faster training")
     parser.add_argument("--img_resize", type=int, nargs=2, default=None,
                        help="Resize images to (width, height)")
     parser.add_argument("--resume_from", type=str, default=None,
                        help="Resume training from checkpoint")
+    parser.add_argument("--save_every_steps", type=int, default=None,
+                       help="Save checkpoint every N global steps (in addition to best/latest/epoch)")
     parser.add_argument("--use_wandb", action="store_true",
                        help="Use Weights & Biases logging")
     parser.add_argument("--no_tensorboard", action="store_true",
@@ -574,7 +601,7 @@ def main():
     else:
         device = torch.device(args.device)
     
-    print(f"🚀 HSR Robot MILE Training v2 with Reconstruction")
+    print(f"🚀 {args.robot_type.upper()} Robot MILE Training v2 with Reconstruction")
     print("=" * 60)
     print(f"Device: {device}")
     print(f"Dataset: {args.data_root}")
@@ -600,6 +627,9 @@ def main():
             config.LOSS.RECONSTRUCTION_WEIGHT = 0.3  # Default reconstruction weight
         
         print(f"🎨 Image reconstruction enabled with weight: {config.LOSS.RECONSTRUCTION_WEIGHT}")
+
+        # Resolve experiment name if not provided
+        resolved_experiment_name = args.experiment_name or f"{args.robot_type}_robot_mile"
         
         if args.robot_type == "hsr":
             data_module = HSRDataModule(
@@ -631,6 +661,17 @@ def main():
         
         # Create model with reconstruction capability
         model = create_model(config)
+
+        # Multi-GPU (DataParallel) support
+        use_dp = False
+        if args.gpus > 1 and torch.cuda.is_available():
+            available = torch.cuda.device_count()
+            if available >= args.gpus:
+                model = torch.nn.DataParallel(model, device_ids=list(range(args.gpus)))
+                use_dp = True
+                print(f"⚙️  Enabled DataParallel on {args.gpus} GPUs")
+            else:
+                print(f"⚠️  Requested {args.gpus} GPUs but only {available} available. Falling back to single GPU.")
         
         # Create trainer
         trainer = HSRTrainer(
@@ -638,9 +679,10 @@ def main():
             model=model,
             data_module=data_module,
             device=device,
-            experiment_name=args.experiment_name,
+            experiment_name=resolved_experiment_name,
             use_wandb=args.use_wandb,
             use_tensorboard=not args.no_tensorboard,
+            save_every_steps=args.save_every_steps,
         )
         
         # Start training

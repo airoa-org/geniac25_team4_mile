@@ -3,7 +3,7 @@
 #SBATCH --partition part-group_25b505
 #SBATCH --nodelist aic-gh2b-310052
 #SBATCH --nodes 1
-#SBATCH --time 12:00:00
+#SBATCH --time 48:00:00
 #SBATCH --output /home/group_25b505/group_4/members/koen/geniac25_team4_mile/logs/%x-%j.out
 #SBATCH --gpus 1
 
@@ -19,14 +19,17 @@ mkdir -p $SINGULARITY_TMPDIR
 export TARGET_DIR=/home/group_25b505/group_4/members/koen/geniac25_team4_mile
 
 # データセット用バインド先
-DATASET_HOST=/home/group_25b505/group_4/datasets
-DATASET_CONT=/opt/processed
+DATASET_HOST=/home/group_25b505/dataset/oxe/raw/datasets--IPEC-COMMUNITY--fractal20220817_data_lerobot
+DATASET_CONT=/opt/processed/fractal20220817_data_lerobot
 
 # コンテナ内で直接 python を叩く
 singularity exec --fakeroot --nv \
   --bind $DATASET_HOST:$DATASET_CONT \
   --bind $TARGET_DIR:/workspace \
   $TARGET_DIR/robot_mile.sif \
-  python3 /workspace/train_hsr_v2.py \
-    --data_root data/tmc_new \
+  python3 /workspace/train_robot.py \
+    --data_root /opt/processed/fractal20220817_data_lerobot \
+    --robot_type oxe_fractal \
+    --gpus 1 \
+    --save_every_steps 10000 \
     --use_wandb
