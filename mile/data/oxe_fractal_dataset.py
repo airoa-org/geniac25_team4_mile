@@ -51,6 +51,8 @@ class OXEFractalDataset(Dataset):
         img_resize: Optional[Tuple[int, int]] = None,
         enable_h264_fallback: bool = True,
         video_backend: str = "pyav",
+        resolve_snapshot: bool = True,
+        max_init_episodes: Optional[int] = None,
     ) -> None:
         self.dataset_path = Path(dataset_path)
         self.modality_configs = modality_configs
@@ -63,7 +65,7 @@ class OXEFractalDataset(Dataset):
         self.video_backend = video_backend
 
         # Resolve snapshot root if needed
-        if not (self.dataset_path / "data").exists() or not (self.dataset_path / "videos").exists():
+        if resolve_snapshot and (not (self.dataset_path / "data").exists() or not (self.dataset_path / "videos").exists()):
             snapshots_dir = self.dataset_path / "snapshots"
             if snapshots_dir.exists() and snapshots_dir.is_dir():
                 snapshot_dirs = sorted([p for p in snapshots_dir.iterdir() if p.is_dir()])
@@ -77,7 +79,7 @@ class OXEFractalDataset(Dataset):
 
         # Load basic metadata
         self.task_idx_mapping = self._load_task_mapping()
-        self._episode_data = self._load_episode_data()
+        self._episode_data = self._load_episode_data(max_init_episodes=max_init_episodes)
         self._trajectory_ids, self._trajectory_lengths = self._get_trajectories()
         self._all_steps = self._get_all_steps()
         self._modality_keys = self._get_modality_keys()
@@ -118,10 +120,12 @@ class OXEFractalDataset(Dataset):
                     mapping[str(obj.get("task_index"))] = obj.get("task", "")
         return mapping
 
-    def _load_episode_data(self) -> Dict[str, pd.DataFrame]:
+    def _load_episode_data(self, max_init_episodes: Optional[int] = None) -> Dict[str, pd.DataFrame]:
         episode_data: Dict[str, pd.DataFrame] = {}
         data_dir = self.dataset_path / "data"
         parquet_files = sorted(data_dir.glob("**/episode_*.parquet"))
+        if max_init_episodes is not None:
+            parquet_files = parquet_files[:max_init_episodes]
         for pq in tqdm(parquet_files, desc="Loading episodes"):
             ep_id = pq.stem  # episode_XXXXXX
             try:
@@ -235,6 +239,21 @@ class OXEFractalDataset(Dataset):
     def __len__(self) -> int:
         return len(self._all_steps)
 
+    @property
+    def trajectory_ids(self) -> np.ndarray:
+        """Array of trajectory (episode) IDs."""
+        return self._trajectory_ids
+
+    @property
+    def trajectory_lengths(self) -> np.ndarray:
+        """Array of trajectory lengths (valid sequence count per episode)."""
+        return self._trajectory_lengths
+
+    @property
+    def all_steps(self) -> List[Tuple[str, int]]:
+        """List of (trajectory_id, step_index) tuples for all valid steps."""
+        return self._all_steps
+
     def get_episode_data(self, episode_id: str) -> pd.DataFrame:
         if self.curr_traj_id == episode_id and self.curr_traj_data is not None:
             return self.curr_traj_data
@@ -316,6 +335,8 @@ class OXEFractalDataModule(pl.LightningDataModule):
         val_split: float = 0.2,
         enable_h264_fallback: bool = True,
         video_backend: str = "pyav",
+        resolve_snapshot: bool = True,
+        max_init_episodes: Optional[int] = None,
     ) -> None:
         super().__init__()
         self.dataset_path = dataset_path
@@ -330,6 +351,8 @@ class OXEFractalDataModule(pl.LightningDataModule):
         self.val_split = val_split
         self.enable_h264_fallback = enable_h264_fallback
         self.video_backend = video_backend
+        self.resolve_snapshot = resolve_snapshot
+        self.max_init_episodes = max_init_episodes
 
         self.modality_configs = {
             "video": OXEFractalModalityConfig(
@@ -361,6 +384,8 @@ class OXEFractalDataModule(pl.LightningDataModule):
             img_resize=self.img_resize,
             enable_h264_fallback=self.enable_h264_fallback,
             video_backend=self.video_backend,
+            resolve_snapshot=self.resolve_snapshot,
+            max_init_episodes=self.max_init_episodes,
         )
 
         total_episodes = len(full._trajectory_ids)
@@ -382,6 +407,8 @@ class OXEFractalDataModule(pl.LightningDataModule):
             img_resize=self.img_resize,
             enable_h264_fallback=self.enable_h264_fallback,
             video_backend=self.video_backend,
+            resolve_snapshot=self.resolve_snapshot,
+            max_init_episodes=self.max_init_episodes,
         )
         self.train_dataset._all_steps = filter_steps(train_episodes)
 
@@ -395,6 +422,8 @@ class OXEFractalDataModule(pl.LightningDataModule):
             img_resize=self.img_resize,
             enable_h264_fallback=self.enable_h264_fallback,
             video_backend=self.video_backend,
+            resolve_snapshot=self.resolve_snapshot,
+            max_init_episodes=self.max_init_episodes,
         )
         self.val_dataset._all_steps = filter_steps(val_episodes)
 

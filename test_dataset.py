@@ -18,7 +18,7 @@ from mile.data.oxe_fractal_dataset import (
 )
 
 
-def test_state_action_only(dataset_path: str, video_backend: str, robot_type: str):
+def test_state_action_only(dataset_path: str, video_backend: str, robot_type: str, camera: str, limit_episodes: int | None):
     """Test dataset with state and action data only (no video)."""
     print("🧪 Testing state and action data only...")
     
@@ -64,6 +64,8 @@ def test_state_action_only(dataset_path: str, video_backend: str, robot_type: st
                 stride=1,
                 enable_h264_fallback=True,
                 video_backend=video_backend,
+                resolve_snapshot=True,
+                max_init_episodes=limit_episodes,
             )
         else:
             dataset = HSRRobotDataset(
@@ -105,7 +107,7 @@ def test_state_action_only(dataset_path: str, video_backend: str, robot_type: st
         return False
 
 
-def test_with_h264_video(dataset_path: str, video_backend: str, robot_type: str, camera: str):
+def test_with_h264_video(dataset_path: str, video_backend: str, robot_type: str, camera: str, limit_episodes: int | None):
     """Test dataset with H264 video fallback."""
     print("\n🧪 Testing with H264 video fallback...")
     
@@ -160,6 +162,8 @@ def test_with_h264_video(dataset_path: str, video_backend: str, robot_type: str,
                 stride=1,
                 enable_h264_fallback=True,
                 video_backend=video_backend,
+                resolve_snapshot=True,
+                max_init_episodes=limit_episodes,
             )
         else:
             dataset = HSRRobotDataset(
@@ -210,7 +214,7 @@ def test_with_h264_video(dataset_path: str, video_backend: str, robot_type: str,
         return False
 
 
-def test_datamodule_strict(dataset_path: str, video_backend: str, robot_type: str, camera: str):
+def test_datamodule_strict(dataset_path: str, video_backend: str, robot_type: str, camera: str, limit_episodes: int | None):
     """Test DataModule with strict error handling."""
     print("\n�� Testing DataModule (strict mode)...")
     
@@ -225,6 +229,8 @@ def test_datamodule_strict(dataset_path: str, video_backend: str, robot_type: st
                 cache_videos=False,
                 enable_h264_fallback=True,
                 video_backend=video_backend,
+                resolve_snapshot=True,
+                max_init_episodes=limit_episodes,
             )
         else:
             data_module = HSRDataModule(
@@ -284,6 +290,8 @@ def main():
                        help="Test PyTorch Lightning DataModule")
     parser.add_argument("--video_backend", type=str, default="pyav", choices=["opencv", "pyav"],
                        help="Video backend to use (opencv or pyav)")
+    parser.add_argument("--limit_episodes", type=int, default=200,
+                       help="Limit number of parquet episodes to scan for faster tests (fractal only)")
     
     args = parser.parse_args()
     
@@ -306,17 +314,17 @@ def main():
     test_results = []
     
     # 1. Test state/action only (safe test)
-    success = test_state_action_only(args.data_root, args.video_backend, args.robot_type)
+    success = test_state_action_only(args.data_root, args.video_backend, args.robot_type, args.camera, args.limit_episodes)
     test_results.append(("State/Action Only", success))
     
     # 2. Test with video (if requested)
     if args.test_video:
-        success = test_with_h264_video(args.data_root, args.video_backend, args.robot_type, args.camera)
+        success = test_with_h264_video(args.data_root, args.video_backend, args.robot_type, args.camera, args.limit_episodes)
         test_results.append(("Video Loading", success))
     
     # 3. Test DataModule (if requested)
     if args.test_datamodule:
-        success = test_datamodule_strict(args.data_root, args.video_backend, args.robot_type, args.camera)
+        success = test_datamodule_strict(args.data_root, args.video_backend, args.robot_type, args.camera, args.limit_episodes)
         test_results.append(("DataModule", success))
     
     # Print results summary
