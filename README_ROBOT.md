@@ -11,7 +11,8 @@
 ```
 mile/data/hsr_dataset.py           # HSR用 Dataset / DataModule
 mile/data/oxe_fractal_dataset.py   # OXE Fractal 用 Dataset / DataModule
-train_hsr.py                       # 共通トレーニングスクリプト（--dataset_type で切替）
+train_robot.py                       # 共通トレーニングスクリプト（--robot_type で切替）
+test_dataset.py                    # データセットテスト（--robot_type で切替）
 ```
 
 ## セットアップ
@@ -49,13 +50,12 @@ python3 -m pip install av pandas pyarrow
     meta/tasks.jsonl
 ```
 
-### 学習コマンド
+### 学習コマンド（ロボット種別で切替）
 
 ```
-python3 train_hsr.py \
-  --dataset_type oxe_fractal \
+python3 train_robot.py \
+  --robot_type oxe_fractal \
   --data_root /opt/processed/fractal20220817_data_lerobot \
-  --camera images.image \
   --sequence_length 8 \
   --batch_size 4 \
   --num_workers 4 \
@@ -64,16 +64,15 @@ python3 train_hsr.py \
 ```
 
 ポイント:
-- `--dataset_type oxe_fractal` を指定
-- カメラは `--camera images.image`（内部ディレクトリ `observation.images.image` を使用）
+- `--robot_type oxe_fractal` を指定
+- Fractalの動画は自動的に `video.images.image` が使われます（内部ディレクトリ `observation.images.image`）
 
 ## HSR での学習（参考）
 
 ```
-python3 train_hsr.py \
-  --dataset_type hsr \
+python3 train_robot.py \
+  --robot_type hsr \
   --data_root /path/to/hsr_data \
-  --camera head_rgbd_sensor \
   --sequence_length 8 \
   --batch_size 4 \
   --num_workers 4 \
@@ -91,5 +90,17 @@ python3 train_hsr.py \
 - `OXEFractalDataset` は `snapshots/<hash>/` を自動検出し、`data/` と `videos/` を探索します
 - 動画キーは `video.images.image`（カメラディレクトリは `observation.images.image`）
 - 言語モダリティは `meta/tasks.jsonl` の `task_index` からタスク文字列を復元
+
+## テストの実行
+
+`test_dataset.py` で簡単な動作確認ができます。
+
+```
+# HSR（状態/行動のみ → 動画 → DataModule）
+python3 test_dataset.py --robot_type hsr --data_root /path/to/hsr_data --test_video --test_datamodule
+
+# OXE Fractal（同上）
+python3 test_dataset.py --robot_type oxe_fractal --data_root /opt/processed/fractal20220817_data_lerobot --test_video --test_datamodule
+```
 
 
