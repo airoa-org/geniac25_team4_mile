@@ -25,6 +25,7 @@ from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mile.data.hsr_dataset import HSRDataModule, HSRModalityConfig
+from mile.data.oxe_fractal_dataset import OXEFractalDataModule
 from mile.models.robot_mile import RobotMile
 from mile.models.common import RGBHead
 from mile.configs.hsr_config import get_hsr_training_config
@@ -111,8 +112,14 @@ class HSRTrainer:
         prepared_batch = {}
         
         # Images: convert from (B, T, H, W, C) to (B, T, C, H, W)
-        if "video.head_rgbd_sensor" in batch:
-            images = batch["video.head_rgbd_sensor"].to(self.device)
+        # Accept any key starting with "video." to support fractal and hsr
+        video_key = None
+        for k in batch.keys():
+            if k.startswith("video."):
+                video_key = k
+                break
+        if video_key is not None:
+            images = batch[video_key].to(self.device)
             B, T, H, W, C = images.shape
             prepared_batch['image'] = images.permute(0, 1, 4, 2, 3)  # (B, T, C, H, W)
         
@@ -173,7 +180,7 @@ class HSRTrainer:
                         text_instructions.append("")
             else:
                 # Fallback for other formats
-                batch_size = len(batch["video.head_rgbd_sensor"]) if "video.head_rgbd_sensor" in batch else 1
+                batch_size = len(batch[video_key]) if video_key is not None else 1
                 text_instructions = [""] * batch_size
             
             prepared_batch['text_instructions'] = text_instructions
@@ -556,6 +563,8 @@ def main():
                        help="Device to use (cuda, cpu, or auto)")
     parser.add_argument("--sequence_length", type=int, default=None,
                        help="Sequence length for temporal modeling (overrides config)")
+    parser.add_argument("--robot_type", type=str, default="hsr", choices=["hsr", "oxe_fractal"],
+                       help="Robot/Dataset type to use (hsr or oxe_fractal)")
     
     args = parser.parse_args()
     
@@ -592,17 +601,30 @@ def main():
         
         print(f"🎨 Image reconstruction enabled with weight: {config.LOSS.RECONSTRUCTION_WEIGHT}")
         
-        data_module = HSRDataModule(
-            dataset_path=args.data_root,
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            sequence_length=config.MODEL.SEQUENCE_LENGTH,
-            cache_videos=args.cache_videos,
-            img_resize=tuple(args.img_resize) if args.img_resize else None,
-            enable_h264_fallback=True,  # Enable H264 fallback for AV1 issues
-            skip_video_on_error=False,  # No dummy data - fail on errors
-            video_backend="pyav",
-        )
+        if args.robot_type == "hsr":
+            data_module = HSRDataModule(
+                dataset_path=args.data_root,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                sequence_length=config.MODEL.SEQUENCE_LENGTH,
+                cache_videos=args.cache_videos,
+                img_resize=tuple(args.img_resize) if args.img_resize else None,
+                enable_h264_fallback=True,  # Enable H264 fallback for AV1 issues
+                skip_video_on_error=False,  # No dummy data - fail on errors
+                video_backend="pyav",
+            )
+        else:
+            data_module = OXEFractalDataModule(
+                dataset_path=args.data_root,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                sequence_length=config.MODEL.SEQUENCE_LENGTH,
+                camera="images.image",
+                cache_videos=args.cache_videos,
+                img_resize=tuple(args.img_resize) if args.img_resize else None,
+                enable_h264_fallback=True,
+                video_backend="pyav",
+            )
         
         # Automatically adjust config to match actual data dimensions
         config = adjust_config_to_data(config, data_module)

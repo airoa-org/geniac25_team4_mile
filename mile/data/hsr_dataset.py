@@ -68,6 +68,8 @@ class HSRRobotDataset(Dataset):
     CAMERA_MAPPING = {
         "head_rgbd_sensor": "observation.image.head",
         "hand_camera": "observation.image.hand",
+        # LeRobot/OXE fractal camera naming
+        "images.image": "observation.images.image",
     }
     
     def __init__(
@@ -101,6 +103,15 @@ class HSRRobotDataset(Dataset):
             skip_video_on_error: Skip video data instead of failing on errors
         """
         self.dataset_path = Path(dataset_path)
+        # Resolve HuggingFace-style snapshots if root doesn't directly contain data/videos
+        if not (self.dataset_path / "data").exists() or not (self.dataset_path / "videos").exists():
+            snapshots_dir = self.dataset_path / "snapshots"
+            if snapshots_dir.exists() and snapshots_dir.is_dir():
+                snapshot_dirs = sorted([p for p in snapshots_dir.iterdir() if p.is_dir()])
+                if snapshot_dirs:
+                    resolved = snapshot_dirs[-1]
+                    print(f"🔎 Detected snapshots directory. Using snapshot: {resolved}")
+                    self.dataset_path = resolved
         self.modality_configs = modality_configs
         self.embodiment_tag = embodiment_tag
         self.video_backend = video_backend
