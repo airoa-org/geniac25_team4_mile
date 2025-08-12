@@ -653,7 +653,8 @@ def main():
                 cache_videos=args.cache_videos,
                 img_resize=tuple(args.img_resize) if args.img_resize else None,
                 enable_h264_fallback=True,
-                video_backend="pyav",
+                video_backend="opencv",
+                skip_video_on_error=True,
             )
         
         # Automatically adjust config to match actual data dimensions

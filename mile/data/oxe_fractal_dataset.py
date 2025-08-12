@@ -53,6 +53,9 @@ class OXEFractalDataset(Dataset):
         video_backend: str = "pyav",
         resolve_snapshot: bool = True,
         max_init_episodes: Optional[int] = None,
+        skip_video_on_error: bool = True,
+        use_on_the_fly_h264: bool = False,
+        h264_cache_dirname: str = "_h264_cache",
     ) -> None:
         self.dataset_path = Path(dataset_path)
         self.modality_configs = modality_configs
@@ -63,6 +66,9 @@ class OXEFractalDataset(Dataset):
         self.img_resize = img_resize
         self.enable_h264_fallback = enable_h264_fallback
         self.video_backend = video_backend
+        self.skip_video_on_error = skip_video_on_error
+        self.use_on_the_fly_h264 = use_on_the_fly_h264
+        self.h264_cache_dirname = h264_cache_dirname
 
         # Resolve snapshot root if needed
         if resolve_snapshot and (not (self.dataset_path / "data").exists() or not (self.dataset_path / "videos").exists()):
@@ -171,17 +177,66 @@ class OXEFractalDataset(Dataset):
         cam_dir = self._camera_dir()
         return self.dataset_path / "videos" / chunk / cam_dir / f"{episode_id}.mp4"
 
+    def _resolve_video_path_h264(self, episode_id: str, key: str) -> Path:
+        """Resolve H.264 converted video path in a mirrored directory videos_h264."""
+        ep_num = int(episode_id.split("_")[-1])
+        chunk_id = ep_num // 1000
+        chunk = f"chunk-{chunk_id:03d}"
+        cam_dir = self._camera_dir()
+        return self.dataset_path / "videos_h264" / chunk / cam_dir / f"{episode_id}.mp4"
+
+    def _resolve_video_path_h264_cache(self, episode_id: str, key: str) -> Path:
+        """Resolve on-the-fly H.264 cache path under a private cache directory."""
+        ep_num = int(episode_id.split("_")[-1])
+        chunk_id = ep_num // 1000
+        chunk = f"chunk-{chunk_id:03d}"
+        cam_dir = self._camera_dir()
+        return self.dataset_path / self.h264_cache_dirname / "videos" / chunk / cam_dir / f"{episode_id}.mp4"
+
+    def _ensure_h264_cache(self, src_path: Path, cache_path: Path) -> Optional[Path]:
+        """If cache does not exist, convert src to H.264 into cache.
+        Returns cache path if available, else None.
+        """
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        if cache_path.exists():
+            return cache_path
+        # Convert using ffmpeg if available
+        try:
+            import subprocess
+            cmd = [
+                "ffmpeg", "-y",
+                "-v", "error",
+                "-i", str(src_path),
+                "-c:v", "libx264",
+                "-crf", "23",
+                "-preset", "veryfast",
+                "-pix_fmt", "yuv420p",
+                str(cache_path),
+            ]
+            subprocess.run(cmd, check=True)
+            return cache_path if cache_path.exists() else None
+        except Exception:
+            return None
+
     def _load_video_frames_pyav(self, video_path: Path) -> Optional[np.ndarray]:
         import av
-        container = av.open(str(video_path))
+        # Reduce threads to improve stability on some AV1 streams
+        try:
+            container = av.open(str(video_path), options={"threads": "1"})
+        except Exception:
+            return None
         stream = container.streams.video[0]
         stream.thread_type = "AUTO"
         frames: List[np.ndarray] = []
-        for frame in container.decode(stream):
-            img = frame.to_rgb().to_ndarray()
-            if self.img_resize:
-                img = cv2.resize(img, self.img_resize)
-            frames.append(img)
+        try:
+            for frame in container.decode(stream):
+                img = frame.to_rgb().to_ndarray()
+                if self.img_resize:
+                    img = cv2.resize(img, self.img_resize)
+                frames.append(img)
+        except Exception:
+            # PyAV failed
+            frames = []
         container.close()
         if not frames:
             return None
@@ -189,7 +244,26 @@ class OXEFractalDataset(Dataset):
 
     def _load_video_frames(self, video_path: Path) -> Optional[np.ndarray]:
         if self.video_backend == "pyav":
-            return self._load_video_frames_pyav(video_path)
+            frames = self._load_video_frames_pyav(video_path)
+            if frames is not None:
+                return frames
+            # Fallback to OpenCV if PyAV failed
+            cap = cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                return None
+            frames: List[np.ndarray] = []
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                if self.img_resize:
+                    frame = cv2.resize(frame, self.img_resize)
+                frames.append(frame)
+            cap.release()
+            if not frames:
+                return None
+            return np.stack(frames, axis=0)
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
             return None
@@ -270,8 +344,29 @@ class OXEFractalDataset(Dataset):
             start_idx = self.start_indices[ep_idx]
             absolute = start_idx + step_indices
             return self.cached_frames[cache_key][absolute]
-        frames = self._load_video_frames(self._resolve_video_path(episode_id, key))
+        # Prefer H.264 converted video if available
+        video_path = self._resolve_video_path(episode_id, key)
+        if self.enable_h264_fallback:
+            # 1) Pre-converted videos_h264
+            h264_path = self._resolve_video_path_h264(episode_id, key)
+            if h264_path.exists():
+                video_path = h264_path
+            # 2) On-the-fly cache for training (does not modify originals)
+            elif self.use_on_the_fly_h264:
+                cache_path = self._resolve_video_path_h264_cache(episode_id, key)
+                cached = self._ensure_h264_cache(video_path, cache_path)
+                if cached is not None and cached.exists():
+                    video_path = cached
+        frames = self._load_video_frames(video_path)
         if frames is None or len(frames) == 0:
+            if self.skip_video_on_error:
+                # Return zero frames to skip effect while keeping batch shape consistent
+                num = len(step_indices)
+                # Heuristic size when unknown
+                w, h = (self.img_resize if self.img_resize else (224, 224))
+                zeros = np.zeros((num, h, w, 3), dtype=np.uint8)
+                print(f"⚠️ Skipping video {video_path} (unreadable). Returning zeros.")
+                return zeros
             raise FileNotFoundError(f"Cannot load video for {episode_id}")
         step_indices = np.clip(step_indices, 0, len(frames) - 1)
         return frames[step_indices]
@@ -337,6 +432,9 @@ class OXEFractalDataModule(pl.LightningDataModule):
         video_backend: str = "pyav",
         resolve_snapshot: bool = True,
         max_init_episodes: Optional[int] = None,
+        skip_video_on_error: bool = True,
+        use_on_the_fly_h264_train: bool = True,
+        use_on_the_fly_h264_val: bool = False,
     ) -> None:
         super().__init__()
         self.dataset_path = dataset_path
@@ -353,6 +451,9 @@ class OXEFractalDataModule(pl.LightningDataModule):
         self.video_backend = video_backend
         self.resolve_snapshot = resolve_snapshot
         self.max_init_episodes = max_init_episodes
+        self.skip_video_on_error = skip_video_on_error
+        self.use_on_the_fly_h264_train = use_on_the_fly_h264_train
+        self.use_on_the_fly_h264_val = use_on_the_fly_h264_val
 
         self.modality_configs = {
             "video": OXEFractalModalityConfig(
@@ -386,6 +487,8 @@ class OXEFractalDataModule(pl.LightningDataModule):
             video_backend=self.video_backend,
             resolve_snapshot=self.resolve_snapshot,
             max_init_episodes=self.max_init_episodes,
+            skip_video_on_error=self.skip_video_on_error,
+            use_on_the_fly_h264=False,
         )
 
         total_episodes = len(full._trajectory_ids)
@@ -409,6 +512,8 @@ class OXEFractalDataModule(pl.LightningDataModule):
             video_backend=self.video_backend,
             resolve_snapshot=self.resolve_snapshot,
             max_init_episodes=self.max_init_episodes,
+            skip_video_on_error=self.skip_video_on_error,
+            use_on_the_fly_h264=self.use_on_the_fly_h264_train,
         )
         self.train_dataset._all_steps = filter_steps(train_episodes)
 
@@ -424,6 +529,8 @@ class OXEFractalDataModule(pl.LightningDataModule):
             video_backend=self.video_backend,
             resolve_snapshot=self.resolve_snapshot,
             max_init_episodes=self.max_init_episodes,
+            skip_video_on_error=self.skip_video_on_error,
+            use_on_the_fly_h264=self.use_on_the_fly_h264_val,
         )
         self.val_dataset._all_steps = filter_steps(val_episodes)
 
