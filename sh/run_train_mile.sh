@@ -32,4 +32,5 @@ singularity exec --fakeroot --nv \
     --robot_type oxe_fractal \
     --gpus 1 \
     --save_every_steps 10000 \
+    --num_workers 0 \
     --use_wandb
