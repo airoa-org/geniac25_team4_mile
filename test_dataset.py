@@ -11,39 +11,73 @@ from pathlib import Path
 import torch
 import numpy as np
 from mile.data.hsr_dataset import HSRRobotDataset, HSRDataModule, HSRModalityConfig
+from mile.data.oxe_fractal_dataset import (
+    OXEFractalDataset,
+    OXEFractalDataModule,
+    OXEFractalModalityConfig,
+)
 
 
-def test_state_action_only(dataset_path: str, video_backend: str):
+def test_state_action_only(dataset_path: str, video_backend: str, robot_type: str, camera: str, limit_episodes: int | None):
     """Test dataset with state and action data only (no video)."""
     print("🧪 Testing state and action data only...")
     
     # Define modality config without video
-    modality_configs = {
-        "state": HSRModalityConfig(
-            delta_indices=[0, 1],
-            modality_keys=["state.joint_positions"]
-        ),
-        "action": HSRModalityConfig(
-            delta_indices=[0, 1],
-            modality_keys=["action.joint_positions"]
-        ),
-        "language": HSRModalityConfig(
-            delta_indices=[0],
-            modality_keys=["annotation.task"]
-        )
-    }
+    if robot_type == "oxe_fractal":
+        modality_configs = {
+            "state": OXEFractalModalityConfig(
+                delta_indices=[0, 1],
+                modality_keys=["state.joint_positions"],
+            ),
+            "action": OXEFractalModalityConfig(
+                delta_indices=[0, 1],
+                modality_keys=["action.joint_positions"],
+            ),
+            "language": OXEFractalModalityConfig(
+                delta_indices=[0],
+                modality_keys=["annotation.task"],
+            ),
+        }
+    else:
+        modality_configs = {
+            "state": HSRModalityConfig(
+                delta_indices=[0, 1],
+                modality_keys=["state.joint_positions"],
+            ),
+            "action": HSRModalityConfig(
+                delta_indices=[0, 1],
+                modality_keys=["action.joint_positions"],
+            ),
+            "language": HSRModalityConfig(
+                delta_indices=[0],
+                modality_keys=["annotation.task"],
+            ),
+        }
     
     try:
-        dataset = HSRRobotDataset(
-            dataset_path=dataset_path,
-            modality_configs=modality_configs,
-            cache_videos=False,
-            sequence_length=2,
-            stride=1,
-            enable_h264_fallback=True,
-            skip_video_on_error=False,
-            video_backend=video_backend,
-        )
+        if robot_type == "oxe_fractal":
+            dataset = OXEFractalDataset(
+                dataset_path=dataset_path,
+                modality_configs=modality_configs,
+                cache_videos=False,
+                sequence_length=2,
+                stride=1,
+                enable_h264_fallback=True,
+                video_backend=video_backend,
+                resolve_snapshot=True,
+                max_init_episodes=limit_episodes,
+            )
+        else:
+            dataset = HSRRobotDataset(
+                dataset_path=dataset_path,
+                modality_configs=modality_configs,
+                cache_videos=False,
+                sequence_length=2,
+                stride=1,
+                enable_h264_fallback=True,
+                skip_video_on_error=False,
+                video_backend=video_backend,
+            )
         
         print(f"✅ Dataset created successfully!")
         print(f"   Valid episodes: {len(dataset.trajectory_ids)}")
@@ -73,41 +107,75 @@ def test_state_action_only(dataset_path: str, video_backend: str):
         return False
 
 
-def test_with_h264_video(dataset_path: str, video_backend: str):
+def test_with_h264_video(dataset_path: str, video_backend: str, robot_type: str, camera: str, limit_episodes: int | None):
     """Test dataset with H264 video fallback."""
     print("\n🧪 Testing with H264 video fallback...")
     
     # Full modality config including video
-    modality_configs = {
-        "video": HSRModalityConfig(
-            delta_indices=[0, 1],
-            modality_keys=["video.head_rgbd_sensor"]
-        ),
-        "state": HSRModalityConfig(
-            delta_indices=[0, 1],
-            modality_keys=["state.joint_positions"]
-        ),
-        "action": HSRModalityConfig(
-            delta_indices=[0, 1],
-            modality_keys=["action.joint_positions"]
-        ),
-        "language": HSRModalityConfig(
-            delta_indices=[0],
-            modality_keys=["annotation.task"]
-        )
-    }
+    if robot_type == "oxe_fractal":
+        video_key = f"video.{camera}"
+        modality_configs = {
+            "video": OXEFractalModalityConfig(
+                delta_indices=[0, 1],
+                modality_keys=[video_key],
+            ),
+            "state": OXEFractalModalityConfig(
+                delta_indices=[0, 1],
+                modality_keys=["state.joint_positions"],
+            ),
+            "action": OXEFractalModalityConfig(
+                delta_indices=[0, 1],
+                modality_keys=["action.joint_positions"],
+            ),
+            "language": OXEFractalModalityConfig(
+                delta_indices=[0],
+                modality_keys=["annotation.task"],
+            ),
+        }
+    else:
+        modality_configs = {
+            "video": HSRModalityConfig(
+                delta_indices=[0, 1],
+                modality_keys=["video.head_rgbd_sensor"],
+            ),
+            "state": HSRModalityConfig(
+                delta_indices=[0, 1],
+                modality_keys=["state.joint_positions"],
+            ),
+            "action": HSRModalityConfig(
+                delta_indices=[0, 1],
+                modality_keys=["action.joint_positions"],
+            ),
+            "language": HSRModalityConfig(
+                delta_indices=[0],
+                modality_keys=["annotation.task"],
+            ),
+        }
     
     try:
-        dataset = HSRRobotDataset(
-            dataset_path=dataset_path,
-            modality_configs=modality_configs,
-            cache_videos=False,
-            sequence_length=2,
-            stride=1,
-            enable_h264_fallback=True,  # Enable H264 fallback
-            skip_video_on_error=False,  # No dummy data
-            video_backend=video_backend,
-        )
+        if robot_type == "oxe_fractal":
+            dataset = OXEFractalDataset(
+                dataset_path=dataset_path,
+                modality_configs=modality_configs,
+                cache_videos=False,
+                sequence_length=2,
+                stride=1,
+                enable_h264_fallback=True,
+                video_backend=video_backend,
+                resolve_snapshot=True,
+                max_init_episodes=limit_episodes,
+            )
+        else:
+            dataset = HSRRobotDataset(
+                dataset_path=dataset_path,
+                modality_configs=modality_configs,
+                cache_videos=False,
+                sequence_length=2,
+                stride=1,
+                enable_h264_fallback=True,  # Enable H264 fallback
+                skip_video_on_error=False,  # No dummy data
+                video_backend=video_backend,
+            )
         
         print(f"✅ Dataset with video created successfully!")
         print(f"   Valid episodes: {len(dataset.trajectory_ids)}")
@@ -146,21 +214,35 @@ def test_with_h264_video(dataset_path: str, video_backend: str):
         return False
 
 
-def test_datamodule_strict(dataset_path: str, video_backend: str):
+def test_datamodule_strict(dataset_path: str, video_backend: str, robot_type: str, camera: str, limit_episodes: int | None):
     """Test DataModule with strict error handling."""
     print("\n�� Testing DataModule (strict mode)...")
     
     try:
-        data_module = HSRDataModule(
-            dataset_path=dataset_path,
-            batch_size=2,  # Small batch for testing
-            num_workers=0,  # Avoid multiprocessing in test
-            sequence_length=2,
-            cache_videos=False,
-            enable_h264_fallback=True,
-            skip_video_on_error=False,  # Strict mode
-            video_backend=video_backend,
-        )
+        if robot_type == "oxe_fractal":
+            data_module = OXEFractalDataModule(
+                dataset_path=dataset_path,
+                batch_size=2,
+                num_workers=0,
+                sequence_length=2,
+                camera=camera,
+                cache_videos=False,
+                enable_h264_fallback=True,
+                video_backend=video_backend,
+                resolve_snapshot=True,
+                max_init_episodes=limit_episodes,
+            )
+        else:
+            data_module = HSRDataModule(
+                dataset_path=dataset_path,
+                batch_size=2,  # Small batch for testing
+                num_workers=0,  # Avoid multiprocessing in test
+                sequence_length=2,
+                cache_videos=False,
+                enable_h264_fallback=True,
+                skip_video_on_error=False,  # Strict mode
+                video_backend=video_backend,
+            )
         
         data_module.setup()
         
@@ -195,19 +277,25 @@ def test_datamodule_strict(dataset_path: str, video_backend: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Test HSR Dataset v2 (No Dummy Data)")
+    parser = argparse.ArgumentParser(description="Test Robot Datasets (HSR / OXE Fractal)")
     parser.add_argument("--data_root", type=str, required=True,
                        help="Path to HSR dataset root")
+    parser.add_argument("--robot_type", type=str, default="hsr", choices=["hsr", "oxe_fractal"],
+                       help="Dataset type to test")
+    parser.add_argument("--camera", type=str, default="images.image",
+                       help="Camera key (for fractal: images.image; for hsr: head_rgbd_sensor)")
     parser.add_argument("--test_video", action="store_true",
                        help="Test video loading functionality")
     parser.add_argument("--test_datamodule", action="store_true",
                        help="Test PyTorch Lightning DataModule")
     parser.add_argument("--video_backend", type=str, default="pyav", choices=["opencv", "pyav"],
                        help="Video backend to use (opencv or pyav)")
+    parser.add_argument("--limit_episodes", type=int, default=200,
+                       help="Limit number of parquet episodes to scan for faster tests (fractal only)")
     
     args = parser.parse_args()
     
-    print("🚀 HSR Dataset v2 Test Suite (No Dummy Data)")
+    print("🚀 Robot Dataset Test Suite (No Dummy Data)")
     print("=" * 60)
     
     # Validate dataset path
@@ -226,17 +314,17 @@ def main():
     test_results = []
     
     # 1. Test state/action only (safe test)
-    success = test_state_action_only(args.data_root, args.video_backend)
+    success = test_state_action_only(args.data_root, args.video_backend, args.robot_type, args.camera, args.limit_episodes)
     test_results.append(("State/Action Only", success))
     
     # 2. Test with video (if requested)
     if args.test_video:
-        success = test_with_h264_video(args.data_root, args.video_backend)
+        success = test_with_h264_video(args.data_root, args.video_backend, args.robot_type, args.camera, args.limit_episodes)
         test_results.append(("Video Loading", success))
     
     # 3. Test DataModule (if requested)
     if args.test_datamodule:
-        success = test_datamodule_strict(args.data_root, args.video_backend)
+        success = test_datamodule_strict(args.data_root, args.video_backend, args.robot_type, args.camera, args.limit_episodes)
         test_results.append(("DataModule", success))
     
     # Print results summary

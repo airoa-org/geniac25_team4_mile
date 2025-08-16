@@ -16,3 +16,4 @@ carla_gym/envs/__pycache__/__init__.cpython-37.pyc
 *.ipynb
 /data/
 events*
+checkpoints/
