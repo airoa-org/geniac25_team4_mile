@@ -297,7 +297,13 @@ class RobotMile(nn.Module):
         if self.count == 0:
             # Encode current observations
             s = batch['image'].shape[1]
-            action_t = batch['action'][:, -2]  # Previous action
+            # Prefer explicitly provided previous action when available; otherwise, fall back to sequence-based access
+            if 'prev_action' in batch and isinstance(batch['prev_action'], torch.Tensor):
+                action_t = batch['prev_action']  # shape: (b, A)
+            else:
+                # Fallback: use previous step in the sequence if available; otherwise use the last one
+                actions_seq = batch['action']  # shape: (b, s, A)
+                action_t = actions_seq[:, -2] if actions_seq.shape[1] >= 2 else actions_seq[:, -1]
             batch = remove_past(batch, s)
             embedding_t = self.encode(batch)[:, -1]  # Current embedding
 
@@ -325,10 +331,16 @@ class RobotMile(nn.Module):
             self.last_h = h_t
             self.last_sample = sample_t
             
-            # Reset counter based on control frequency
-            control_frequency = self.cfg.CONTROL_FREQUENCY
-            model_stride_sec = self.cfg.DATASET.STRIDE_SEC
-            n_steps_per_stride = int(control_frequency * model_stride_sec)
+            # Reset counter based on control frequency with robust fallbacks across configs
+            control_frequency = getattr(self.cfg, 'CONTROL_FREQUENCY', 1)
+            # Prefer STRIDE_SEC if available; otherwise fall back to discrete STRIDE or default 1
+            model_stride_sec = getattr(getattr(self.cfg, 'DATASET', object()), 'STRIDE_SEC', None)
+            if model_stride_sec is not None:
+                n_steps_per_stride = int(max(1, round(control_frequency * float(model_stride_sec))))
+            else:
+                stride_steps = getattr(getattr(self.cfg, 'DATASET', object()), 'STRIDE', 1)
+                # If STRIDE is defined as steps, use it directly; ensure at least 1
+                n_steps_per_stride = int(max(1, int(stride_steps)))
             self.count = n_steps_per_stride - 1
         else:
             self.count -= 1
