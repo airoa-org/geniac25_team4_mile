@@ -50,6 +50,7 @@ mile/agents/rl_birdview/models/torch_util.py
 mile/agents/rl_birdview/utils/rl_birdview_wrapper.py
 mile/agents/rl_birdview/utils/wandb_callback.py
 mile/configs/debug.yml
+mile/configs/fractal_config.py
 mile/configs/hsr_config.py
 mile/configs/mile.yml
 mile/configs/one_frame.yml
