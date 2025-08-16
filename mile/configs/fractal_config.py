@@ -16,6 +16,12 @@ def get_fractal_config():
       generic robot config and rely on runtime checks to skip unavailable signals.
     """
     cfg = get_robot_config()
+    # Standardized robot naming schema (Fractal may not have joints/actions)
+    cfg.ROBOT.JOINT_NAMES = ["x", "y", "z", "rx", "ry", "rz", "rw", "gripper"]
+    cfg.ROBOT.ACTION_NAMES = ["x", "y", "z", "roll", "pitch", "yaw", "gripper"]
+    
+    cfg.MODEL.NUM_JOINTS = 8
+    cfg.MODEL.JOINT.INPUT_DIM = 7 # Fractal action dimensions
 
     # Image encoder emphasis (vision-centric)
     cfg.MODEL.ENCODER.OUT_CHANNELS = 256

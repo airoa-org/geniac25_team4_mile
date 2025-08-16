@@ -47,6 +47,11 @@ def get_robot_config():
     cfg.MODEL.TRANSITION.USE_DROPOUT = True
     cfg.MODEL.TRANSITION.DROPOUT_PROBABILITY = 0.1
     
+    # Robot naming schema (standardized across configs)
+    cfg.ROBOT = CN()
+    cfg.ROBOT.JOINT_NAMES = []  # Optional: semantic joint names if available
+    cfg.ROBOT.ACTION_NAMES = []  # Optional: semantic action names (length == action dims)
+    
     # Training settings
     cfg.TRAIN = CN()
     cfg.TRAIN.BATCH_SIZE = 8

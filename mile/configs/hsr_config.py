@@ -13,7 +13,7 @@ def get_hsr_config():
     
     # HSR-specific model settings
     cfg.MODEL.NUM_JOINTS = 11  # HSR action dimensions
-    cfg.MODEL.JOINT.INPUT_DIM = 16  # 8 positions + 8 velocities
+    cfg.MODEL.JOINT.INPUT_DIM = 8  # 8 positions + 8 velocities
     cfg.MODEL.ACTION_RANGE = (-2.0, 2.0)  # HSR action range
     cfg.MODEL.SEQUENCE_LENGTH = 8  # Match with EVAL.SEQUENCE_LENGTH for consistency
     cfg.MODEL.HIDDEN_STATE_DIM = 512  # Higher dimensional state for complex HSR robot
@@ -57,9 +57,8 @@ def get_hsr_config():
     cfg.EVAL.SEQUENCE_LENGTH = 8  # Shorter sequences for efficiency
     cfg.EVAL.RGB_SUPERVISION = True  # Enable image reconstruction
     
-    # HSR-specific settings
-    cfg.HSR = CN()
-    cfg.HSR.JOINT_NAMES = [
+    # Standardized robot naming schema
+    cfg.ROBOT.JOINT_NAMES = [
         'arm_lift_joint',
         'arm_flex_joint', 
         'arm_roll_joint',
@@ -69,11 +68,11 @@ def get_hsr_config():
         'head_pan_joint',
         'head_tilt_joint'
     ]
-    cfg.HSR.ACTION_NAMES = [
-        'arm_lift', 'arm_flex', 'arm_roll', 'wrist_flex', 'wrist_roll',  # arm joints
-        'hand_motor',  # gripper
-        'head_pan', 'head_tilt',  # head joints  
-        'base_x', 'base_y', 'base_theta'  # base movement
+    cfg.ROBOT.ACTION_NAMES = [
+        'arm_lift', 'arm_flex', 'arm_roll', 'wrist_flex', 'wrist_roll',
+        'hand_motor',
+        'head_pan', 'head_tilt',
+        'base_x', 'base_y', 'base_theta'
     ]
     
     return cfg
