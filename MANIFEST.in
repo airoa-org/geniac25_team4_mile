@@ -1,0 +1,4 @@
+include README.md
+recursive-include mile/configs *.yml
+recursive-include carla_gym/core/obs_manager/birdview/maps *.h5
+recursive-include carla_gym/envs/scenario_descriptions *.xml *.json
