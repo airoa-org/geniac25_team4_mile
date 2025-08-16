@@ -33,6 +33,63 @@ from mile.configs.fractal_config import get_fractal_training_config
 from mile.losses import KLLoss
 
 
+def get_config(args):
+    # Load configuration per robot_type
+        if args.robot_type == "hsr":
+            config = get_hsr_training_config(args.data_root)
+        else:
+            config = get_fractal_training_config(args.data_root)
+        
+        # Override config with command line arguments
+        config.TRAIN.BATCH_SIZE = args.batch_size
+        config.TRAIN.LEARNING_RATE = args.learning_rate
+        config.TRAIN.NUM_EPOCHS = args.epochs
+        
+        # Override sequence length if provided
+        if args.sequence_length is not None:
+            config.MODEL.SEQUENCE_LENGTH = args.sequence_length
+            print(f"🔧 Overriding sequence length to: {args.sequence_length}")
+        
+        # Enable reconstruction and set weight
+        config.EVAL.RGB_SUPERVISION = True
+        if not hasattr(config.LOSS, 'RECONSTRUCTION_WEIGHT'):
+            config.LOSS.RECONSTRUCTION_WEIGHT = 0.3  # Default reconstruction weight
+        
+        print(f"🎨 Image reconstruction enabled with weight: {config.LOSS.RECONSTRUCTION_WEIGHT}")
+
+        # Resolve experiment name if not provided
+        resolved_experiment_name = args.experiment_name or f"{args.robot_type}_robot_mile"
+        
+        if args.robot_type == "hsr":
+            data_module = HSRDataModule(
+                dataset_path=args.data_root,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                sequence_length=config.MODEL.SEQUENCE_LENGTH,
+                cache_videos=args.cache_videos,
+                img_resize=tuple(args.img_resize) if args.img_resize else None,
+                enable_h264_fallback=True,  # Enable H264 fallback for AV1 issues
+                skip_video_on_error=False,  # No dummy data - fail on errors
+                video_backend="pyav",
+            )
+        else:
+            data_module = OXEFractalDataModule(
+                dataset_path=args.data_root,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                sequence_length=config.MODEL.SEQUENCE_LENGTH,
+                camera="images.image",
+                cache_videos=args.cache_videos,
+                img_resize=tuple(args.img_resize) if args.img_resize else None,
+                enable_h264_fallback=True,
+                video_backend="opencv",
+                skip_video_on_error=True,
+            )
+        
+        # Automatically adjust config to match actual data dimensions
+        config = adjust_config_to_data(config, data_module)
+
+
 class HSRTrainer:
     """Trainer for HSR Robot MILE with new dataset implementation and reconstruction capability."""
     
@@ -609,11 +666,8 @@ def main():
     print(f"Experiment: {args.experiment_name}")
     
     try:
-        # Load configuration per robot_type
-        if args.robot_type == "hsr":
-            config = get_hsr_training_config(args.data_root)
-        else:
-            config = get_fractal_training_config(args.data_root)
+        # Load configuration
+        config = get_hsr_training_config(args.data_root)
         
         # Override config with command line arguments
         config.TRAIN.BATCH_SIZE = args.batch_size
