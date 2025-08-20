@@ -126,6 +126,13 @@ class HSRTrainer:
             images = batch[video_key].to(self.device)
             B, T, H, W, C = images.shape
             prepared_batch['image'] = images.permute(0, 1, 4, 2, 3)  # (B, T, C, H, W)
+            # ImageNet normalization for timm pretrained encoders
+            prepared_batch['image'] = prepared_batch['image'].float() / 255.0
+            mean = self.model.encoder.default_cfg['mean']
+            std = self.model.encoder.default_cfg['std']
+            mean = torch.tensor(mean, device=self.device, dtype=prepared_batch['image'].dtype).view(1, 1, 3, 1, 1)
+            std = torch.tensor(std, device=self.device, dtype=prepared_batch['image'].dtype).view(1, 1, 3, 1, 1)
+            prepared_batch['image'] = (prepared_batch['image'] - mean) / std
         
         # Joint states
         if "state.joint_positions" in batch:
