@@ -20,8 +20,8 @@ def get_fractal_config():
     cfg.ROBOT.JOINT_NAMES = ["x", "y", "z", "rx", "ry", "rz", "rw", "gripper"]
     cfg.ROBOT.ACTION_NAMES = ["x", "y", "z", "roll", "pitch", "yaw", "gripper"]
     
-    cfg.MODEL.NUM_JOINTS = 8
-    cfg.MODEL.JOINT.INPUT_DIM = 7 # Fractal action dimensions
+    cfg.MODEL.NUM_JOINTS = 7  # Fractal action dimensions
+    cfg.MODEL.JOINT.INPUT_DIM = 8
 
     # Image encoder emphasis (vision-centric)
     cfg.MODEL.ENCODER.OUT_CHANNELS = 256
