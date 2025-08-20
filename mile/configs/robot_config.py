@@ -18,7 +18,11 @@ def get_robot_config():
     # Model architecture
     cfg.MODEL = CN()
     cfg.MODEL.NUM_JOINTS = 7  # Number of robot joints (e.g., 7-DOF arm)
-    cfg.MODEL.ACTION_RANGE = (-1.0, 1.0)  # Action output range
+    # Action output ranges
+    # If ACTION_RANGES is provided, it must be a list/tuple of per-dimension (min,max)
+    # and will override ACTION_RANGE. This enables per-dim ranges like gripper in [0,1].
+    cfg.MODEL.ACTION_RANGE = (-1.0, 1.0)
+    cfg.MODEL.ACTION_RANGES = []  # Optional[List[Tuple[float,float]]]
     cfg.MODEL.EMBEDDING_DIM = 512
     cfg.MODEL.SEQUENCE_LENGTH = 8  # Default sequence length for temporal modeling
     cfg.MODEL.HIDDEN_STATE_DIM = 256  # Hidden state dimension for models
@@ -32,6 +36,10 @@ def get_robot_config():
     cfg.MODEL.LANGUAGE = CN()
     cfg.MODEL.LANGUAGE.MODEL_NAME = 'all-mpnet-base-v2'
     cfg.MODEL.LANGUAGE.HIDDEN_DIM = 256
+    # Control whether to freeze SentenceTransformer weights
+    cfg.MODEL.LANGUAGE.FREEZE = True
+    # L2-normalize sentence embeddings
+    cfg.MODEL.LANGUAGE.NORMALIZE = True
     
     # Joint state encoder settings
     cfg.MODEL.JOINT = CN()

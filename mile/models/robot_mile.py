@@ -11,10 +11,19 @@ from mile.models.transition import RSSM
 
 
 class LanguageEncoder(nn.Module):
-    """Encodes language instructions using a pretrained SentenceTransformer model."""
-    def __init__(self, model_name='all-mpnet-base-v2', hidden_dim=256):
+    """Encodes language instructions using a SentenceTransformer model.
+
+    Supports freezing for feature extraction and unfreezing for fine-tuning.
+    """
+    def __init__(self, model_name='all-mpnet-base-v2', hidden_dim=256, freeze=True, normalize=True):
         super().__init__()
         self.language_model = SentenceTransformer(model_name)
+        self.freeze = freeze
+        self.normalize = normalize
+        # Freeze or unfreeze parameters
+        for p in self.language_model.parameters():
+            p.requires_grad = not self.freeze
+
         embedding_dim = self.language_model.get_sentence_embedding_dimension()
 
         self.language_projection = nn.Sequential(
@@ -28,22 +37,33 @@ class LanguageEncoder(nn.Module):
     def forward(self, text_instructions):
         """
         Args:
-            text_instructions: List of strings
+            text_instructions: List[str]
 
         Returns:
             language_features: Tensor (batch_size, hidden_dim)
         """
-        # Encode text using SentenceTransformer
-        with torch.no_grad():  # Typically embeddings are frozen unless fine-tuning
-            embeddings = self.language_model.encode(
-                text_instructions, 
-                convert_to_tensor=True,
-                normalize_embeddings=True
-            ).to(next(self.parameters()).device)
-        embeddings = embeddings.clone()
+        device = next(self.parameters()).device
+
+        if self.freeze:
+            # Feature extraction path (no grad)
+            with torch.no_grad():
+                embeddings = self.language_model.encode(
+                    text_instructions,
+                    convert_to_tensor=True,
+                    normalize_embeddings=self.normalize,
+                ).to(device)
+            embeddings = embeddings.clone()
+        else:
+            # Fine-tuning path with gradients
+            tokens = self.language_model.tokenize(text_instructions)
+            tokens = {k: v.to(device) for k, v in tokens.items()}
+            outputs = self.language_model(tokens)
+            embeddings = outputs['sentence_embedding']
+            if self.normalize:
+                embeddings = F.normalize(embeddings, p=2, dim=-1)
+
         # Project to desired dimension
         language_features = self.language_projection(embeddings)
-
         return language_features
 
 
@@ -72,20 +92,43 @@ class JointEncoder(nn.Module):
 
 
 class RobotPolicy(nn.Module):
-    """Policy network for robot joint control"""
-    def __init__(self, in_channels, num_joints, action_range=(-1, 1)):
+    """Policy network for robot joint control with per-dimension ranges"""
+    def __init__(self, in_channels, num_joints, action_range=(-1, 1), action_ranges=None):
         super().__init__()
         self.num_joints = num_joints
         self.action_range = action_range
-        
+        self.action_ranges = action_ranges if (action_ranges and len(action_ranges) == num_joints) else None
+        # Backbone that outputs pre-activation logits
         self.policy_head = nn.Sequential(
             nn.Linear(in_channels, 256),
             nn.ReLU(True),
             nn.Linear(256, 256),
             nn.ReLU(True),
             nn.Linear(256, num_joints),
-            nn.Tanh()  # Output in [-1, 1] range
         )
+        # Choose activation(s) by action range(s)
+        if self.action_ranges is None:
+            action_range_tuple = tuple(action_range) if isinstance(action_range, (list, tuple)) else action_range
+            if action_range_tuple == (-1, 1):
+                self.output_activation = 'tanh'
+                self.apply_scale = False
+            elif action_range_tuple == (0, 1):
+                self.output_activation = 'sigmoid'
+                self.apply_scale = False
+            else:
+                self.output_activation = 'tanh'
+                self.apply_scale = True
+        else:
+            # Per-dim activation tags: 'tanh', 'sigmoid', or 'scale'
+            self.per_dim_mode = []
+            for r in self.action_ranges:
+                r = tuple(r)
+                if r == (-1.0, 1.0):
+                    self.per_dim_mode.append('tanh')
+                elif r == (0.0, 1.0):
+                    self.per_dim_mode.append('sigmoid')
+                else:
+                    self.per_dim_mode.append('scale')
         
     def forward(self, state):
         """
@@ -94,12 +137,36 @@ class RobotPolicy(nn.Module):
         Returns:
             actions: (batch_size * sequence_length, num_joints)
         """
-        actions = self.policy_head(state)
-        # Scale to desired action range
-        if self.action_range != (-1, 1):
-            min_val, max_val = self.action_range
-            actions = (actions + 1) * (max_val - min_val) / 2 + min_val
-        return actions
+        logits = self.policy_head(state)
+        if self.action_ranges is None:
+            if self.output_activation == 'tanh':
+                actions = torch.tanh(logits)
+            elif self.output_activation == 'sigmoid':
+                actions = torch.sigmoid(logits)
+            else:
+                actions = torch.tanh(logits)
+            if getattr(self, 'apply_scale', False):
+                min_val, max_val = self.action_range
+                actions = (actions + 1) * (max_val - min_val) / 2 + min_val
+            return actions
+        else:
+            # Per-dim activation & scaling
+            actions = logits
+            out_list = []
+            for j in range(self.num_joints):
+                mode = self.per_dim_mode[j]
+                xj = actions[:, j]
+                if mode == 'tanh':
+                    yj = torch.tanh(xj)
+                elif mode == 'sigmoid':
+                    yj = torch.sigmoid(xj)
+                else:
+                    # generic scale from [-1,1]
+                    yj = torch.tanh(xj)
+                    mn, mx = self.action_ranges[j]
+                    yj = (yj + 1) * (mx - mn) / 2 + mn
+                out_list.append(yj.unsqueeze(-1))
+            return torch.cat(out_list, dim=-1)
 
 
 class RobotMile(nn.Module):
@@ -125,7 +192,9 @@ class RobotMile(nn.Module):
         # Language encoder
         self.language_encoder = LanguageEncoder(
             model_name=cfg.MODEL.LANGUAGE.MODEL_NAME,
-            hidden_dim=cfg.MODEL.LANGUAGE.HIDDEN_DIM
+            hidden_dim=cfg.MODEL.LANGUAGE.HIDDEN_DIM,
+            freeze=cfg.MODEL.LANGUAGE.FREEZE,
+            normalize=cfg.MODEL.LANGUAGE.NORMALIZE,
         )
         
         # Joint state encoder
@@ -179,7 +248,8 @@ class RobotMile(nn.Module):
         self.policy = RobotPolicy(
             in_channels=state_dim,
             num_joints=self.num_joints,
-            action_range=cfg.MODEL.ACTION_RANGE
+            action_range=cfg.MODEL.ACTION_RANGE,
+            action_ranges=getattr(cfg.MODEL, 'ACTION_RANGES', None),
         )
 
         # Image reconstruction head (always enabled for better representation learning)

@@ -22,6 +22,8 @@ def get_fractal_config():
     
     cfg.MODEL.NUM_JOINTS = 7  # Fractal action dimensions
     cfg.MODEL.JOINT.INPUT_DIM = 8
+    # Per-dimension action ranges (last dim gripper in [0,1], others in [-1,1])
+    cfg.MODEL.ACTION_RANGES = [(-1.0, 1.0)] * (cfg.MODEL.NUM_JOINTS - 1) + [(0.0, 1.0)]
 
     # Image encoder emphasis (vision-centric)
     cfg.MODEL.ENCODER.OUT_CHANNELS = 256
